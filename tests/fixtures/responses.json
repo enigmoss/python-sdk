@@ -1,0 +1,363 @@
+{
+    "project": {
+        "id": "3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f",
+        "name": "Example Shop",
+        "key_type": "payment",
+        "permissions": [
+            "payment_create_invoice",
+            "info_payments",
+            "webhooks"
+        ],
+        "server_time": 1767225600
+    },
+    "payment": {
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "order_id": "order-42",
+        "wallet_id": null,
+        "status": "pending",
+        "is_final": false,
+        "failure_code": null,
+        "amount": "10.50",
+        "currency_code": "USDT",
+        "payer": {
+            "amount": null,
+            "currency_code": null,
+            "network_code": null,
+            "address": null,
+            "sender_address": null,
+            "exchange_rate": null
+        },
+        "paid": {
+            "amount": null,
+            "amount_usd": null
+        },
+        "settlement": {
+            "amount": null,
+            "currency_code": null,
+            "fee": null
+        },
+        "conversion": null,
+        "discount": {
+            "percent": null,
+            "amount": null
+        },
+        "tx_hash": null,
+        "payment_url": "https://pay.example.com/invoice/7c9e6679-7425-40de-944b-e07fc1f90ae7?theme=system",
+        "expires_at": "2026-01-01T01:00:00Z",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "paid_at": null,
+        "description": null,
+        "metadata": []
+    },
+    "paid_payment": {
+        "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "order_id": "order-42",
+        "wallet_id": null,
+        "status": "paid",
+        "is_final": true,
+        "failure_code": null,
+        "amount": "10.50",
+        "currency_code": "USDT",
+        "payer": {
+            "amount": "10.50",
+            "currency_code": "USDT",
+            "network_code": "tron",
+            "address": "TXYZabcdefghijklmnopqrstuvwxyz1234",
+            "sender_address": "TSenderabcdefghijklmnopqrstuvwxyz12",
+            "exchange_rate": "1"
+        },
+        "paid": {
+            "amount": "10.50",
+            "amount_usd": "10.49"
+        },
+        "settlement": {
+            "amount": "10.29",
+            "currency_code": "USDT",
+            "fee": "0.21"
+        },
+        "conversion": null,
+        "discount": {
+            "percent": null,
+            "amount": null
+        },
+        "tx_hash": "0x7f3a9c",
+        "payment_url": "https://pay.example.com/invoice/7c9e6679-7425-40de-944b-e07fc1f90ae7?theme=system",
+        "expires_at": "2026-01-01T01:00:00Z",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+        "paid_at": "2026-01-01T00:05:00Z",
+        "description": null,
+        "metadata": []
+    },
+    "wallet": {
+        "id": "0f8fad5b-d9cb-469f-a165-70867728950e",
+        "order_id": "customer-7",
+        "currency_code": "USDT",
+        "network_code": "tron",
+        "address": "TXYZabcdefghijklmnopqrstuvwxyz1234",
+        "status": "active",
+        "refund_incoming": false,
+        "callback_url": null,
+        "payment_url": "https://pay.example.com/static/0f8fad5b-d9cb-469f-a165-70867728950e",
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z"
+    },
+    "refund": {
+        "id": "01970000-0000-7000-8000-000000000001",
+        "order_id": "refund-42",
+        "source": "payment",
+        "payment_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "wallet_id": null,
+        "status": "pending",
+        "is_final": false,
+        "failure_code": null,
+        "amount": "10.50",
+        "currency_code": "USDT",
+        "network_code": "tron",
+        "address": "TCustomerabcdefghijklmnopqrstuvwxy",
+        "tx_hash": null,
+        "created_at": "2026-01-02T00:00:00Z",
+        "updated_at": "2026-01-02T00:00:00Z",
+        "completed_at": null
+    },
+    "payout": {
+        "id": "9b2d4f6a-1c3e-4a5b-8d7f-0e1a2b3c4d5e",
+        "order_id": "withdrawal-42",
+        "status": "pending",
+        "is_final": false,
+        "failure_code": null,
+        "amount": "100.00",
+        "currency_code": "USDT",
+        "network_code": "tron",
+        "address": "TRecipientabcdefghijklmnopqrstuvwx",
+        "memo": null,
+        "priority": "recommended",
+        "recipient": {
+            "amount": "99.00",
+            "currency_code": "USDT"
+        },
+        "charged": {
+            "amount": "100.00",
+            "currency_code": "USDT",
+            "fee": "1.00"
+        },
+        "conversion": null,
+        "tx_hash": null,
+        "created_at": "2026-01-03T00:00:00Z",
+        "updated_at": "2026-01-03T00:00:00Z"
+    },
+    "payout_quote": {
+        "amount": "100.00",
+        "currency_code": "USDT",
+        "network_code": "tron",
+        "priority": "recommended",
+        "recipient": {
+            "amount": "99.00",
+            "currency_code": "USDT"
+        },
+        "charged": {
+            "amount": "100.00",
+            "currency_code": "USDT",
+            "fee": "1.00"
+        },
+        "conversion": null
+    },
+    "transfer": {
+        "id": "01970000-0000-7000-8000-000000000002",
+        "order_id": "transfer-1",
+        "amount": "25.00",
+        "currency_code": "USDT",
+        "transaction_id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+        "created_at": "2026-01-04T00:00:00Z"
+    },
+    "transaction": {
+        "id": "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d",
+        "type": "payment",
+        "amount": "10.29",
+        "fee": "0.21",
+        "currency_code": "USDT",
+        "network_code": "tron",
+        "payment_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "payout_id": null,
+        "refund_id": null,
+        "transfer_id": null,
+        "created_at": "2026-01-01T00:05:00Z"
+    },
+    "balance": {
+        "currency_code": "USDT",
+        "balance": "490.50",
+        "balance_usd": "490.12"
+    },
+    "event_record": {
+        "id": "019b7710-0000-7000-8000-000000000001",
+        "event": "payment.paid",
+        "object_type": "payment",
+        "object_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "delivery_status": "delivered",
+        "created_at": "2026-01-01T00:05:00Z",
+        "payload": {
+            "event": "payment.paid",
+            "event_id": "019b7710-0000-7000-8000-000000000001",
+            "created_at": "2026-01-01T00:05:00Z",
+            "data": {
+                "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                "order_id": "order-42",
+                "wallet_id": null,
+                "status": "paid",
+                "is_final": true,
+                "failure_code": null,
+                "amount": "10.50",
+                "currency_code": "USDT",
+                "payer": {
+                    "amount": "10.50",
+                    "currency_code": "USDT",
+                    "network_code": "tron",
+                    "address": "TXYZabcdefghijklmnopqrstuvwxyz1234",
+                    "sender_address": "TSenderabcdefghijklmnopqrstuvwxyz12",
+                    "exchange_rate": "1"
+                },
+                "paid": {
+                    "amount": "10.50",
+                    "amount_usd": "10.49"
+                },
+                "settlement": {
+                    "amount": "10.29",
+                    "currency_code": "USDT",
+                    "fee": "0.21"
+                },
+                "conversion": null,
+                "discount": {
+                    "percent": null,
+                    "amount": null
+                },
+                "tx_hash": "0x7f3a9c",
+                "payment_url": "https://pay.example.com/invoice/7c9e6679-7425-40de-944b-e07fc1f90ae7?theme=system",
+                "expires_at": "2026-01-01T01:00:00Z",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "paid_at": "2026-01-01T00:05:00Z",
+                "description": null,
+                "metadata": []
+            }
+        }
+    },
+    "event_record_with_attempts": {
+        "id": "019b7710-0000-7000-8000-000000000001",
+        "event": "payment.paid",
+        "object_type": "payment",
+        "object_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+        "delivery_status": "delivered",
+        "created_at": "2026-01-01T00:05:00Z",
+        "payload": {
+            "event": "payment.paid",
+            "event_id": "019b7710-0000-7000-8000-000000000001",
+            "created_at": "2026-01-01T00:05:00Z",
+            "data": {
+                "id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
+                "order_id": "order-42",
+                "wallet_id": null,
+                "status": "paid",
+                "is_final": true,
+                "failure_code": null,
+                "amount": "10.50",
+                "currency_code": "USDT",
+                "payer": {
+                    "amount": "10.50",
+                    "currency_code": "USDT",
+                    "network_code": "tron",
+                    "address": "TXYZabcdefghijklmnopqrstuvwxyz1234",
+                    "sender_address": "TSenderabcdefghijklmnopqrstuvwxyz12",
+                    "exchange_rate": "1"
+                },
+                "paid": {
+                    "amount": "10.50",
+                    "amount_usd": "10.49"
+                },
+                "settlement": {
+                    "amount": "10.29",
+                    "currency_code": "USDT",
+                    "fee": "0.21"
+                },
+                "conversion": null,
+                "discount": {
+                    "percent": null,
+                    "amount": null
+                },
+                "tx_hash": "0x7f3a9c",
+                "payment_url": "https://pay.example.com/invoice/7c9e6679-7425-40de-944b-e07fc1f90ae7?theme=system",
+                "expires_at": "2026-01-01T01:00:00Z",
+                "created_at": "2026-01-01T00:00:00Z",
+                "updated_at": "2026-01-01T00:00:00Z",
+                "paid_at": "2026-01-01T00:05:00Z",
+                "description": null,
+                "metadata": []
+            }
+        },
+        "attempts": [
+            {
+                "number": 1,
+                "trigger": "auto",
+                "status": "delivered",
+                "url": "https://shop.example/webhooks/enigmoss",
+                "response_status_code": 200,
+                "response_body": "ok",
+                "scheduled_at": null,
+                "created_at": "2026-01-01T00:05:01Z",
+                "updated_at": "2026-01-01T00:05:02Z"
+            }
+        ]
+    },
+    "payment_method": {
+        "currency_code": "USDT",
+        "network_code": "tron",
+        "is_enabled": true,
+        "discount_percent": -5
+    },
+    "payout_method": {
+        "currency_code": "USDT",
+        "network_code": "tron",
+        "contract_address": "TR7NHqjeKQxGTCi8q8ZY4pL8otSzgjLj6t",
+        "min_amount": "1.00",
+        "max_amount": "100000.00",
+        "fee": {
+            "amount": "1.00",
+            "percent": "0.5"
+        }
+    },
+    "payout_method_details": {
+        "currency_code": "USDT",
+        "network_code": "tron",
+        "network_name": "Tron",
+        "token_standard": "TRC20",
+        "min_amount": "1.00",
+        "max_amount": "100000.00",
+        "decimals": 6,
+        "is_memo_available": false,
+        "priorities": [
+            {
+                "priority": "recommended",
+                "fee": "1.00"
+            },
+            {
+                "priority": "high",
+                "fee": "2.50"
+            }
+        ]
+    },
+    "exchange_rate": {
+        "from": "BTC",
+        "to": "USDT",
+        "rate": "65000.12"
+    },
+    "aml_verification_link": {
+        "url": "https://pay.example.com/aml/1",
+        "status": "init",
+        "expires_at": "2026-01-02T00:00:00Z"
+    },
+    "bulk_redelivery_result": {
+        "queued": 3,
+        "already_pending": 0,
+        "skipped_outdated": 1
+    }
+}

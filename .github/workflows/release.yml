@@ -1,0 +1,63 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.13"
+      - name: The tag matches __version__
+        run: python scripts/check_version.py "${GITHUB_REF_NAME}"
+      - run: uv sync --locked
+      - run: uv run pytest
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  testpypi:
+    # Release candidates go to TestPyPI first.
+    if: contains(github.ref_name, 'rc')
+    needs: build
+    runs-on: ubuntu-latest
+    environment: testpypi
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          attestations: true
+
+  pypi:
+    needs: [build, testpypi]
+    if: always() && needs.build.result == 'success' && (needs.testpypi.result == 'success' || needs.testpypi.result == 'skipped')
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      # PyPI Trusted Publishing (OIDC): no API token is stored anywhere.
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: true

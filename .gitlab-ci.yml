@@ -1,0 +1,23 @@
+# Mirror of the GitHub Actions lint and test jobs. Publishing happens only from GitHub Actions.
+stages: [lint, test]
+
+default:
+  image: ghcr.io/astral-sh/uv:python3.13-bookworm-slim
+
+lint:
+  stage: lint
+  script:
+    - uv sync --locked
+    - uv run ruff format --check src tests scripts
+    - uv run ruff check src tests scripts
+    - uv run mypy
+
+test:
+  stage: test
+  image: ghcr.io/astral-sh/uv:python${PYTHON}-bookworm-slim
+  parallel:
+    matrix:
+      - PYTHON: ["3.11", "3.12", "3.13", "3.14"]
+  script:
+    - uv sync --locked --no-default-groups --group test
+    - uv run pytest

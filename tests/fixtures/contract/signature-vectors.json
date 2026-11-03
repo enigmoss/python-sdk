@@ -1,0 +1,74 @@
+{
+    "_comment": "Published test vectors of the API v4 request and webhook signatures. Values never change: a new case gets a new vector with a new name.",
+    "version": 1,
+    "request": {
+        "algorithm": "hex(HMAC-SHA256(secret, string_to_sign)), lowercase hex",
+        "string_to_sign_format": "{timestamp}\\n{project}\\n{METHOD}\\n{path_with_query}\\n{body}",
+        "headers": {
+            "project": "X-Project-Uuid",
+            "timestamp": "X-Timestamp",
+            "signature": "X-Signature"
+        },
+        "timestamp": "1767225600",
+        "project": "3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f",
+        "secrets": {
+            "payment": "test-payment-secret",
+            "payout": "test-payout-secret"
+        },
+        "vectors": [
+            {
+                "name": "get-without-body",
+                "description": "GET without body: body is an empty string, the string to sign ends with a newline.",
+                "method": "GET",
+                "path": "/api/v4/project",
+                "body": "",
+                "body_bytes": 0,
+                "key_type": "payment",
+                "string_to_sign": "1767225600\n3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f\nGET\n/api/v4/project\n",
+                "signature": "60b66487028d417d160edc7303fd2660168d92cf6d952fd46688bc8c47dc6c51"
+            },
+            {
+                "name": "post-with-body-and-query",
+                "description": "POST with body and query: the path is signed together with the query exactly as sent.",
+                "method": "POST",
+                "path": "/api/v4/payments?expand=payer&limit=10",
+                "body": "{\"amount\":\"10.50\",\"currency_code\":\"USDT\",\"order_id\":\"order-1\"}",
+                "body_bytes": 62,
+                "key_type": "payment",
+                "string_to_sign": "1767225600\n3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f\nPOST\n/api/v4/payments?expand=payer&limit=10\n{\"amount\":\"10.50\",\"currency_code\":\"USDT\",\"order_id\":\"order-1\"}",
+                "signature": "21f6d2bcad0879155b4c5b8492e3cb0b6ebffca2083a0800251b5b6b6b66cfed"
+            },
+            {
+                "name": "non-ascii-body-with-crlf",
+                "description": "Non-ASCII UTF-8 body with CRLF: raw bytes are signed, no normalization.",
+                "method": "POST",
+                "path": "/api/v4/payouts",
+                "body": "{\r\n  \"description\": \"Оплата заказа №42 — café\"\r\n}",
+                "body_bytes": 66,
+                "key_type": "payout",
+                "string_to_sign": "1767225600\n3f2b8c1e-5d4a-4e7b-9c6f-1a2b3c4d5e6f\nPOST\n/api/v4/payouts\n{\r\n  \"description\": \"Оплата заказа №42 — café\"\r\n}",
+                "signature": "90402f953edcf126b77ca5c6fc6b80eca0aa720d4d286d6d59dabfbdea6e0995"
+            }
+        ]
+    },
+    "webhook": {
+        "algorithm": "hex(HMAC-SHA256(current payment secret, string_to_sign)), lowercase hex",
+        "string_to_sign_format": "{timestamp}\\n{project}\\n{body}",
+        "headers": {
+            "project": "X-Project-Uuid",
+            "timestamp": "X-Timestamp",
+            "signature": "X-Signature"
+        },
+        "vectors": [
+            {
+                "name": "webhook-test-event",
+                "timestamp": "1767225600",
+                "project": "d6a7f0c2-6b1e-4b9a-9f3e-2c4d5e6f7a8b",
+                "secret": "test-payment-secret",
+                "body": "{\"data\": null, \"event\": \"webhook.test\", \"event_id\": \"019b7710-0000-7000-8000-000000000001\", \"created_at\": \"2026-01-01T00:00:00Z\"}",
+                "string_to_sign": "1767225600\nd6a7f0c2-6b1e-4b9a-9f3e-2c4d5e6f7a8b\n{\"data\": null, \"event\": \"webhook.test\", \"event_id\": \"019b7710-0000-7000-8000-000000000001\", \"created_at\": \"2026-01-01T00:00:00Z\"}",
+                "signature": "b34839a123bc55752bc78929bd598292ce688fce648db7b9879e9448d5d749eb"
+            }
+        ]
+    }
+}

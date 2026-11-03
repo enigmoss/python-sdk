@@ -1,0 +1,113 @@
+# enigmoss (Python SDK of the Enigmoss Project API v4)
+
+> Official sync client: payments (invoices), static wallets, payouts, refunds, transfers, balances,
+> webhook verification. Python >= 3.11, zero dependencies. `pip install enigmoss`.
+
+## Rules that must never be broken
+
+- Money is `str` or `Decimal` ("10.50"), never `float` (a float raises InvalidArgumentError).
+  Amounts are sent exactly as given; response amounts are `Decimal`.
+- Verify webhooks on the RAW body bytes (`request.body`, `request.get_data()`,
+  `await request.body()`), never on a re-encoded dict. Answer 400 on WebhookVerificationError,
+  2xx within 15 s otherwise. Deduplicate by `event.id` atomically (INSERT ... ON CONFLICT DO NOTHING).
+- One `order_id` is one object (invoice, wallet, payout, refund, transfer), forever. Repeating a
+  create with the same `order_id` is safe (same Idempotency-Key, stored response for 24 h).
+  A new payment attempt for the same shop order needs a new `order_id` (e.g. f"order-{id}-{attempt}").
+- On any EnigmossError check `exc.outcome_unknown` first. If True: do NOT create a new order_id,
+  do NOT repeat the create in the same request; mark "to reconcile" and check later with
+  `find_by_order_id(order_id)` or wait for the webhook.
+- Fulfil an order only when `payment.is_successful` (status PAID/OVERPAID and is_final).
+  A static wallet deposit is a payment with `wallet_id` set and `order_id` None: branch on it first.
+- `base_url` is required (white-label host from the dashboard); there is no default host and no test mode.
+- The client is sync. In `async def` use `await asyncio.to_thread(...)` or a `def` endpoint.
+- All webhooks (payment.*, payout.*, refund.*) are signed with the PAYMENT key.
+
+## Client
+
+```python
+import enigmoss
+client = enigmoss.Enigmoss(base_url="https://api.example.com", project_id="<uuid>",
+                           payment_key="...", payout_key=None)   # at least one key
+client = enigmoss.Enigmoss.from_env()  # ENIGMOSS_BASE_URL, ENIGMOSS_PROJECT_ID, ENIGMOSS_PAYMENT_KEY, ENIGMOSS_PAYOUT_KEY
+```
+
+Keyword options: timeout=30.0 (payout/refund create >= 180 s), max_retries=2 (0 = off),
+idempotency="order_id" | "random" | None, transport=<obj with send(HttpRequest) -> HttpResponse>,
+app_info=("name", "version"), allow_insecure_http=False.
+Per call: `options=enigmoss.RequestOptions(idempotency_key=, timeout=, max_retries=, extra_body=, extra_query=)`.
+
+## Methods (keyword-only arguments named like the wire fields; ids positional)
+
+Key: [pay] payment key, [out] payout key, [any] either.
+
+- payments [pay]: create(amount, currency_code, order_id, settlement_currency_code=, network_code=,
+  return_url=, success_url=, callback_url=, expires_in=, allow_multiple_payments=, customer_fee_percent=,
+  underpayment_tolerance_percent=, discount_percent=, allowed_methods=[PaymentMethodRef], excluded_methods=,
+  customer_email=, metadata=dict, description=, theme=, referral_code=) -> Payment;
+  get(payment_id); find_by_order_id(order_id) -> Payment | None;
+  list(order_id=, wallet_id=, status=, created_from=, created_to=, limit=, cursor=) -> Page[Payment];
+  iterate(...same without cursor) -> Iterator[Payment]; cancel(payment_id); mark_paid(payment_id);
+  create_aml_verification_links(payment_id) -> list[AmlVerificationLink]
+- wallets [pay]: create(currency_code, network_code, order_id, callback_url=, referral_code=) -> Wallet;
+  get; find_by_order_id; list(order_id=, status=, currency_code=, network_code=, created_from=, created_to=,
+  limit=, cursor=); iterate; block(wallet_id, refund_incoming=False)
+- payouts [out]: quote(amount, currency_code, address, network_code=, ...) -> PayoutQuote;
+  create(order_id, amount, currency_code, address, network_code=, memo=, recipient_currency_code=,
+  source_currency_code=, fee_deducted_from_amount=, rate_source=, priority=, callback_url=) -> Payout;
+  get; find_by_order_id; list(order_id=, status=, created_from=, created_to=, limit=, cursor=); iterate
+- refunds [out]: create_for_payment(payment_id, order_id, address, amount=None, fee_deducted_from_amount=,
+  callback_url=) -> Refund; create_for_wallet(wallet_id, order_id, address, callback_url=);
+  get; find_by_order_id; list(order_id=, source=, status=, payment_id=, wallet_id=, ...); iterate
+- transfers [out]: create(order_id, amount, currency_code) -> Transfer; get; find_by_order_id; list; iterate
+- balances [pay]: list() -> list[Balance]
+- transactions [pay]: list(type=, created_from=, created_to=, limit=, cursor=) -> Page[Transaction]; iterate
+- payment_methods [any]: list(); update_discount(currency_code, network_code, discount_percent=) [pay]
+- payout_methods [any]: list(); get(currency_code, network_code) -> PayoutMethodDetails
+- exchange_rates [any]: list(from_=None)
+- events [pay]: list(event=, object_type=, object_id=, delivery_status=, created_from=, created_to=, limit=,
+  cursor=) -> Page[EventRecord]; iterate; get(event_id); redeliver(event_id);
+  redeliver_bulk(created_from, created_to=, event=, object_type=, object_id=, delivery_status=)
+- webhooks [pay]: construct_event(raw_body: bytes, headers) -> WebhookEvent; send_test(callback_url=None)
+- project [any]: get() -> Project (name, key_type, permissions, server_time)
+- client.request(method, path, body=None, query=None, key="payment"|"payout"|"any", options=) -> RawResponse
+
+Dates in filters: timezone-aware datetime. Page: .items, .next_cursor, .has_more.
+
+## Webhooks
+
+```python
+event = client.webhooks.construct_event(raw_body, request.headers)   # bytes, any header mapping
+event = enigmoss.webhooks.construct_event(raw_body, headers, project_id="<uuid>", payment_key=[new, old])
+event.id          # dedup key (stable across redeliveries)
+event.type        # "payment.paid", "payout.completed", "refund.completed", "webhook.test", ...
+event.object      # Payment | Payout | Refund | None (lazy)
+event.data        # raw JSON dict
+```
+
+Passing `str` instead of `bytes` raises TypeError.
+
+## Errors (enigmoss.*)
+
+EnigmossError (.outcome_unknown, .request_id, .idempotency_key)
+- APIError (.status, .code, .type, .message, .details, .violations, .retry_after) - 400/422 too
+  - AuthenticationError 401, PermissionDeniedError 403, NotFoundError 404
+  - ConflictError 409 (.is_order_id_taken, .existing_resource_id)
+  - IdempotencyError 409 idempotency.* (NOT a ConflictError; in_progress => outcome_unknown)
+  - RateLimitError 429, ServerError 5xx (outcome_unknown always True)
+- TransportError (.phase: not_sent | sent | unknown), UnexpectedResponseError,
+  WebhookVerificationError (.reason), InvalidArgumentError (also ValueError), ConfigurationError
+Compare `exc.code` with `enigmoss.ErrorCode.*`; always keep a default branch.
+
+## Import map
+
+- `enigmoss`: Enigmoss, RequestOptions, Secret, Page, RawResponse, PaymentMethodRef, WebhookEvent,
+  HttpRequest, HttpResponse, Transport, StdlibTransport, every error class, ErrorCode, SendPhase.
+- `enigmoss.models`: Payment, PaymentStatus, Wallet, WalletStatus, Payout, PayoutStatus, PayoutPriority,
+  PayoutQuote, Refund, RefundStatus, RefundSource, Transfer, Balance, Transaction, TransactionType,
+  PaymentMethod, PayoutMethod, PayoutMethodDetails, ExchangeRate (.from_), Project, EventRecord,
+  DeliveryStatus, WebhookObjectType, AmlVerificationLink, Theme, ...
+- `enigmoss.webhooks`: construct_event (without a client).
+- `enigmoss.errors`: the error classes and ErrorCode.
+
+Enums are StrEnum with UNKNOWN for values newer than the SDK. Models are frozen dataclasses;
+`model.raw` keeps the JSON as received.
