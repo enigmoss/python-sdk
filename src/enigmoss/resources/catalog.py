@@ -51,7 +51,10 @@ class PaymentMethodsResource(Resource):
         return self._one(
             _DISCOUNT,
             PaymentMethod._parse,
-            path_params={"currency_code": currency_code, "network_code": network_code},
+            path_params={
+                "currency_code": v.code(currency_code, "currency_code"),
+                "network_code": v.code(network_code, "network_code"),
+            },
             body={"discount_percent": v.int_range(discount_percent, "discount_percent", -99, 90)},
             options=options,
         )
@@ -84,7 +87,10 @@ class PayoutMethodsResource(Resource):
         return self._one(
             _PAYOUT_METHOD,
             PayoutMethodDetails._parse,
-            path_params={"currency_code": currency_code, "network_code": network_code},
+            path_params={
+                "currency_code": v.code(currency_code, "currency_code"),
+                "network_code": v.code(network_code, "network_code"),
+            },
             options=options,
         )
 

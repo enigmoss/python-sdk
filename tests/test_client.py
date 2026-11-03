@@ -107,6 +107,17 @@ def test_request_escape_hatch() -> None:
             client.request("GET", bad)
 
 
+def test_path_segments_are_validated() -> None:
+    transport = FakeTransport(ok(response("payment_method")))
+    client = make_client(transport)
+    for bad in ("..", ".", "", "USDT/tron", "a?b"):
+        with pytest.raises(enigmoss.InvalidArgumentError):
+            client.payment_methods.update_discount(bad, "tron", discount_percent=0)
+        with pytest.raises(enigmoss.InvalidArgumentError):
+            client.payout_methods.get("USDT", bad)
+    assert transport.requests == []
+
+
 def test_extra_query_and_body() -> None:
     transport = FakeTransport(ok(response("payment")))
     client = make_client(transport)

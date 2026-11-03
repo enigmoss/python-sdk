@@ -16,6 +16,7 @@ E = TypeVar("E", bound=StrEnum)
 _UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}")
 _ORDER_ID = re.compile(r"[A-Za-z0-9_-]{1,128}")
 _AMOUNT = re.compile(r"\d{1,11}(\.\d{1,18})?")
+_CODE = re.compile(r"[A-Za-z0-9_-]{1,32}")
 
 Amount = str | Decimal | int
 
@@ -25,6 +26,13 @@ def uuid(value: str, name: str) -> str:
     if not isinstance(value, str) or not _UUID.fullmatch(value):
         raise InvalidArgumentError(f'{name} must be a UUID, got "{value}".')
     return value.lower()
+
+
+def code(value: str, name: str) -> str:
+    """A currency or network code used as a path segment: never "..", "/" or empty."""
+    if not isinstance(value, str) or not _CODE.fullmatch(value):
+        raise InvalidArgumentError(f'{name} must be 1-32 letters, digits, "_" or "-", got {value!r}.')
+    return value
 
 
 def checked_uuid(value: str | None, name: str) -> str | None:
