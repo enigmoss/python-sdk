@@ -16,6 +16,7 @@ rules for AI assistants are in ``llms.txt`` inside this package.
 
 from enigmoss import models, webhooks
 from enigmoss._client import Enigmoss, RawResponse
+from enigmoss._fallback import OriginChange
 from enigmoss._options import RequestOptions
 from enigmoss._page import Page
 from enigmoss._secret import Secret
@@ -56,6 +57,7 @@ __all__ = [
     "IdempotencyError",
     "InvalidArgumentError",
     "NotFoundError",
+    "OriginChange",
     "Page",
     "PaymentMethodRef",
     "PermissionDeniedError",

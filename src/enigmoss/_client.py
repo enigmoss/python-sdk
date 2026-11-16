@@ -5,12 +5,13 @@ from __future__ import annotations
 import os
 import platform
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 from urllib.parse import urlsplit
 
 from enigmoss import webhooks
+from enigmoss._fallback import OriginChange
 from enigmoss._http import API_PREFIX, Config, Endpoint, IdempotencyMode, KeyScope, KeySupport, Requester
 from enigmoss._options import RequestOptions
 from enigmoss._retry import RetryClass
@@ -85,6 +86,12 @@ class Enigmoss:
             :mod:`http.client`.
         app_info: ``(name, version)`` of your application, appended to the User-Agent.
         allow_insecure_http: Allow ``http://`` base URLs (local development only).
+        fallback_base_url: A second host that tells where the API is when ``base_url`` cannot be
+            reached, e.g. ``"https://api.example.org"``. After the retries, a call that still
+            could not connect asks this host for the current API origin, checks the signature of
+            the answer, remembers the origin and repeats the request there. Not set: no fallback.
+        on_origin_change: Called with an :class:`OriginChange` when the client starts to use
+            another API origin: log it, alert on it.
 
     Raises:
         ConfigurationError: A required value is missing or malformed.
@@ -103,6 +110,8 @@ class Enigmoss:
         transport: Transport | None = None,
         app_info: tuple[str, str | None] | None = None,
         allow_insecure_http: bool = False,
+        fallback_base_url: str | None = None,
+        on_origin_change: Callable[[OriginChange], None] | None = None,
     ) -> None:
         if payment_key is None and payout_key is None:
             raise ConfigurationError("Pass at least one API key: payment_key and/or payout_key.")
@@ -114,6 +123,8 @@ class Enigmoss:
             raise ConfigurationError('idempotency must be "order_id", "random" or None.')
         if transport is not None and not callable(getattr(transport, "send", None)):
             raise ConfigurationError("transport must have a send(HttpRequest) -> HttpResponse method.")
+        if on_origin_change is not None and not callable(on_origin_change):
+            raise ConfigurationError("on_origin_change must be a callable taking an OriginChange.")
 
         self._config = Config(
             origin=_origin(base_url, allow_insecure_http),
@@ -124,6 +135,13 @@ class Enigmoss:
             max_retries=max_retries,
             idempotency=idempotency,
             user_agent=_user_agent(app_info),
+            fallback_origin=(
+                None
+                if fallback_base_url is None
+                else _origin(fallback_base_url, allow_insecure_http, "fallback_base_url")
+            ),
+            allow_insecure_http=bool(allow_insecure_http),
+            on_origin_change=on_origin_change,
         )
         self._requester = Requester(self._config, transport if transport is not None else StdlibTransport())
 
@@ -159,7 +177,8 @@ class Enigmoss:
         """Builds a client from the ``ENIGMOSS_*`` environment variables.
 
         Reads ``ENIGMOSS_BASE_URL``, ``ENIGMOSS_PROJECT_ID``, ``ENIGMOSS_PAYMENT_KEY`` and
-        ``ENIGMOSS_PAYOUT_KEY`` (set at least one of the keys).
+        ``ENIGMOSS_PAYOUT_KEY`` (set at least one of the keys), and the optional
+        ``ENIGMOSS_FALLBACK_BASE_URL``.
 
         Keyword arguments are passed to the constructor and win over the environment.
 
@@ -172,6 +191,7 @@ class Enigmoss:
             ("project_id", "ENIGMOSS_PROJECT_ID"),
             ("payment_key", "ENIGMOSS_PAYMENT_KEY"),
             ("payout_key", "ENIGMOSS_PAYOUT_KEY"),
+            ("fallback_base_url", "ENIGMOSS_FALLBACK_BASE_URL"),
         ):
             value = os.environ.get(variable, "").strip()
             if value:
@@ -193,8 +213,11 @@ class Enigmoss:
 
     @property
     def base_url(self) -> str:
-        """The API origin, without ``/api/v4``."""
-        return self._config.origin
+        """The API origin in use now, without ``/api/v4``.
+
+        The configured one, or the origin learned from ``fallback_base_url`` while it is kept.
+        """
+        return self._requester.active_origin()
 
     def request(
         self,
@@ -260,11 +283,14 @@ class Enigmoss:
         return webhooks.construct_event(payload, headers, project_id=self._config.project_id, payment_key=key)
 
     def __repr__(self) -> str:
-        return f"Enigmoss(base_url={self._config.origin!r}, project_id={self._config.project_id!r})"
+        return f"Enigmoss(base_url={self.base_url!r}, project_id={self._config.project_id!r})"
 
 
-def _origin(base_url: str, allow_insecure_http: bool) -> str:
+def _origin(base_url: str, allow_insecure_http: bool, name: str = "base_url") -> str:
+    """Normalizes ``base_url`` (and, by the same rules, ``fallback_base_url``) to an origin."""
     if not isinstance(base_url, str) or not base_url.strip():
+        if name != "base_url":
+            raise ConfigurationError(f'{name} must be an absolute URL such as "https://api.example.org".')
         raise ConfigurationError(
             'base_url is required: your API host from the dashboard, e.g. "https://api.example.com".'
         )
@@ -272,20 +298,20 @@ def _origin(base_url: str, allow_insecure_http: bool) -> str:
         parts = urlsplit(base_url.strip())
         port = parts.port
     except ValueError as exc:
-        raise ConfigurationError(f"base_url is not a valid URL: {exc}") from exc
+        raise ConfigurationError(f"{name} is not a valid URL: {exc}") from exc
     scheme = parts.scheme.lower()
     if not parts.hostname or scheme not in ("http", "https"):
-        raise ConfigurationError('base_url must be an absolute URL such as "https://api.example.com".')
+        raise ConfigurationError(f'{name} must be an absolute URL such as "https://api.example.com".')
     if scheme == "http" and not allow_insecure_http:
         raise ConfigurationError(
-            "base_url must use https (set allow_insecure_http=True only for local development)."
+            f"{name} must use https (set allow_insecure_http=True only for local development)."
         )
     if parts.username is not None or parts.password is not None or parts.query or parts.fragment:
-        raise ConfigurationError("base_url must not contain credentials, a query string or a fragment.")
+        raise ConfigurationError(f"{name} must not contain credentials, a query string or a fragment.")
     path = parts.path.rstrip("/")
     if path not in ("", API_PREFIX):
         raise ConfigurationError(
-            'base_url must point at the API host ("https://api.example.com"), '
+            f'{name} must point at the API host ("https://api.example.com"), '
             f'optionally followed by "{API_PREFIX}"; got path "{path}".'
         )
     host = parts.hostname.lower()

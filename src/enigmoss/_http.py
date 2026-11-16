@@ -6,6 +6,7 @@ timestamp and the signature are fresh on every attempt.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import math
 import re
@@ -13,10 +14,13 @@ import threading
 import time
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import Enum
+from functools import partial
 from typing import Any, Literal, TypeVar
 
-from enigmoss import _retry, _signing
+from enigmoss import _fallback, _retry, _signing
+from enigmoss._fallback import OriginChange, OriginState, Outcome
 from enigmoss._options import RequestOptions
 from enigmoss._retry import RetryClass
 from enigmoss._secret import Secret
@@ -41,6 +45,8 @@ from enigmoss.errors import (
 API_PREFIX = "/api/v4"
 PAYOUT_TIMEOUT = 180.0
 """Creating a payout (and the payout leg of a refund) may take up to ~160 s on the server."""
+PROBE_URI = API_PREFIX + "/project/platform-brand"
+"""What the fallback host is asked: its answer carries the current API origin (``data.api.origin``)."""
 
 T = TypeVar("T")
 
@@ -105,6 +111,9 @@ class Config:
     max_retries: int
     idempotency: IdempotencyMode
     user_agent: str
+    fallback_origin: str | None = None
+    allow_insecure_http: bool = False
+    on_origin_change: Callable[[OriginChange], None] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -158,6 +167,7 @@ class Requester:
         self.config = config
         self.transport = transport
         self.clock_skew = ClockSkew()
+        self.origins = OriginState(config.origin, config.fallback_origin)
         # Injectable for tests.
         self.now: Callable[[], float] = time.time
         self.sleep: Callable[[float], None] = time.sleep
@@ -196,35 +206,20 @@ class Requester:
             else max(config.timeout, endpoint.min_timeout or 0.0)
         )
         deadline = self.now() + timeout * (max_retries + 1) + max_retry_after * max_retries
-        url = config.origin + request_uri
+        # The origin is fixed per series of attempts; only a fallback moves the call to another.
+        origin = self.active_origin()
+        can_fall_back = config.fallback_origin is not None
 
         attempt = 0
         clock_corrected = False
         while True:
             attempt += 1
-            timestamp = self.clock_skew.timestamp(self.now())
-            headers = {
-                "Accept": "application/json",
-                "User-Agent": config.user_agent,
-                "X-Project-Uuid": config.project_id,
-                "X-Timestamp": str(timestamp),
-                "X-Signature": _signing.sign_request(
-                    key.reveal(),
-                    timestamp,
-                    config.project_id,
-                    endpoint.method,
-                    request_uri,
-                    body_bytes or b"",
-                ),
-            }
-            if body_bytes is not None:
-                headers["Content-Type"] = "application/json"
-            if idempotency_key is not None:
-                headers["Idempotency-Key"] = idempotency_key
-
+            headers = self._signed_headers(
+                key, endpoint.method, request_uri, body_bytes, idempotency_key=idempotency_key
+            )
             request = HttpRequest(
                 method=endpoint.method,
-                url=url,
+                url=origin + request_uri,
                 headers=headers,
                 body=body_bytes,
                 timeout=timeout,
@@ -239,9 +234,21 @@ class Requester:
                     endpoint.retry, exc, has_key=idempotency_key is not None
                 )
                 wait = _retry.delay(attempt, None, max_retry_after, self.random) if retry else None
-                if not self._can_retry(wait, attempt, max_retries, deadline):
+                if self._can_retry(wait, attempt, max_retries, deadline):
+                    self.sleep(wait or 0.0)
+                    continue
+                if not (can_fall_back and getattr(exc, "host_unreachable", False)):
                     raise
-                self.sleep(wait or 0.0)
+                # Retries did not help and the host certainly was not reached: ask the fallback
+                # host where the API is now. Once per call.
+                can_fall_back = False
+                is_probe = endpoint.method == "GET" and request_uri == PROBE_URI
+                moved = self._fall_back(exc, origin, deadline, idempotency_key, is_probe)
+                if isinstance(moved, ApiResult):
+                    return moved
+                # Same body and Idempotency-Key, a fresh signature; attempts count from zero,
+                # the deadline of the call does not.
+                origin, attempt = moved, 0
                 continue
 
             if 200 <= response.status < 300:
@@ -273,6 +280,142 @@ class Requester:
 
     def _can_retry(self, wait: float | None, attempt: int, max_retries: int, deadline: float) -> bool:
         return wait is not None and attempt <= max_retries and self.now() + wait < deadline
+
+    def active_origin(self) -> str:
+        """The origin requests go to now: ``base_url``, or the one learned from the fallback host."""
+        if self.config.fallback_origin is None:
+            return self.config.origin
+        return self.origins.active(self.now())
+
+    def _signed_headers(
+        self,
+        key: Secret,
+        method: str,
+        request_uri: str,
+        body: bytes | None,
+        *,
+        idempotency_key: str | None = None,
+    ) -> dict[str, str]:
+        config = self.config
+        timestamp = self.clock_skew.timestamp(self.now())
+        headers = {
+            "Accept": "application/json",
+            "User-Agent": config.user_agent,
+            "X-Project-Uuid": config.project_id,
+            "X-Timestamp": str(timestamp),
+            "X-Signature": _signing.sign_request(
+                key.reveal(), timestamp, config.project_id, method, request_uri, body or b""
+            ),
+        }
+        if body is not None:
+            headers["Content-Type"] = "application/json"
+        if idempotency_key is not None:
+            headers["Idempotency-Key"] = idempotency_key
+        return headers
+
+    def _fall_back(
+        self,
+        error: TransportError,
+        failed: str,
+        deadline: float,
+        idempotency_key: str | None,
+        is_probe: bool,
+    ) -> str | ApiResult:
+        """Asks the fallback host for the API origin, sharing one probe with concurrent calls.
+
+        Returns the origin to repeat the call on. A call that itself asked for what the probe
+        fetches (``is_probe``) gets the verified answer of the fallback host as its result.
+
+        Raises:
+            TransportError: ``error`` itself, when the fallback was skipped (paused, no time
+                left) or did not help (the fallback host is unreachable too, or names the origin
+                that just failed).
+            EnigmossError: The fallback host answered with an error or with something that
+                cannot be trusted. Chained to ``error``.
+        """
+        outcome, led = self.origins.resolve(failed, self.now, deadline, lambda: self._probe(failed, deadline))
+        if outcome is None:
+            raise error
+        if outcome.kind == "failed":
+            assert outcome.error is not None  # noqa: S101 - set together with the kind
+            failure = outcome.error(idempotency_key)
+            # The original request never left the client: what is known about its outcome is
+            # what the network error says, not what the status of the fallback answer suggests.
+            failure.outcome_unknown = error.outcome_unknown
+            raise failure from error
+
+        moved = outcome.kind == "moved" and _fallback.comparable(outcome.origin) != _fallback.comparable(
+            failed
+        )
+        if moved and led and self.config.on_origin_change is not None:
+            change = OriginChange(failed, outcome.origin, datetime.fromtimestamp(outcome.expires_at, tz=UTC))
+            # A failing callback must never break an API call.
+            with contextlib.suppress(Exception):
+                self.config.on_origin_change(change)
+        if is_probe and outcome.response is not None:
+            return _success(outcome.response, idempotency_key)
+        if not moved:
+            raise error
+        return outcome.origin
+
+    def _probe(self, failed: str, deadline: float) -> Outcome:
+        """One signed ``GET /api/v4/project/platform-brand`` to the fallback host, past the retry loop."""
+        config = self.config
+        key = config.payment_key or config.payout_key
+        assert key is not None and config.fallback_origin is not None  # noqa: S101 - checked by the client
+        host = config.fallback_origin
+        clock_corrected = False
+        while True:
+            headers = self._signed_headers(key, "GET", PROBE_URI, None)
+            request = HttpRequest(
+                method="GET",
+                url=host + PROBE_URI,
+                headers=headers,
+                body=None,
+                timeout=_fallback.PROBE_TIMEOUT,
+                keep_alive=False,
+            )
+            try:
+                response = self.transport.send(request)
+            except TransportError:
+                return Outcome("unreachable")
+
+            if 200 <= response.status < 300:
+                return self._read_probe(response, key, headers["X-Signature"], failed, host)
+
+            error, _ = map_error(response, None)
+            if (
+                isinstance(error, AuthenticationError)
+                and error.code == ErrorCode.TIMESTAMP_EXPIRED
+                and not clock_corrected
+                and error.server_time is not None
+                and deadline - self.now() >= _fallback.PROBE_TIMEOUT
+                and self.clock_skew.adjust(error.server_time, self.now())
+            ):
+                clock_corrected = True
+                continue
+            return Outcome("failed", error=partial(_fallback_error, response, host))
+
+    def _read_probe(
+        self, response: HttpResponse, key: Secret, request_signature: str, failed: str, host: str
+    ) -> Outcome:
+        now = self.now()
+        problem = _fallback.signature_problem(
+            response, key.reveal(), request_signature, self.clock_skew.timestamp(now)
+        )
+        if problem is None:
+            value, ttl = _fallback.read_origin(response.body)
+            if not isinstance(value, str):
+                problem = "it has no data.api.origin"
+            else:
+                origin = _fallback.validate_origin(value, allow_insecure_http=self.config.allow_insecure_http)
+                if origin is None:
+                    problem = "its data.api.origin is not an https origin of an API host"
+                elif origin == _fallback.comparable(failed):
+                    return Outcome("same", origin=origin, response=response)
+                else:
+                    return Outcome("moved", origin=origin, expires_at=now + ttl, response=response)
+        return Outcome("failed", error=partial(_untrusted_answer, response, host, problem))
 
     def _key(self, scope: KeyScope, method: str, path: str) -> Secret:
         config = self.config
@@ -525,6 +668,37 @@ def _violations(raw: Any) -> tuple[Violation, ...]:
             )
         )
     return tuple(result)
+
+
+_FALLBACK_NOTE = (
+    "The API host could not be reached (see __cause__), so the SDK asked the fallback host for "
+    "the current API origin; this is its answer. The original request was not sent."
+)
+
+
+def _fallback_error(
+    response: HttpResponse, host: str, idempotency_key: str | None
+) -> APIError | UnexpectedResponseError:
+    """The error of a non-2xx answer of the fallback host, as a normal call would raise it."""
+    error, _ = map_error(response, idempotency_key)
+    message = str(error.args[0]).replace("Check base_url", "Check fallback_base_url")
+    error.args = (f"The fallback API host {host} answered with an error: {message}",)
+    error.add_note(_FALLBACK_NOTE)
+    return error
+
+
+def _untrusted_answer(
+    response: HttpResponse, host: str, problem: str, idempotency_key: str | None
+) -> UnexpectedResponseError:
+    """The error of a 2xx answer of the fallback host that is unsigned, unreadable or names no origin."""
+    error = UnexpectedResponseError(
+        f"The answer of the fallback API host {host} cannot be used: {problem}.",
+        status=response.status,
+        request_id=response.header("X-Request-Id"),
+        idempotency_key=idempotency_key,
+    )
+    error.add_note(_FALLBACK_NOTE)
+    return error
 
 
 _DIGITS = re.compile(r"\d{1,10}")
