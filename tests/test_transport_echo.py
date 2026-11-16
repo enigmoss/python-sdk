@@ -10,6 +10,7 @@ import socket
 import threading
 import time
 from collections.abc import Iterator
+from contextlib import contextmanager
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -163,6 +164,97 @@ def test_refused_connection_is_not_sent() -> None:
     assert caught.value.phase is SendPhase.NOT_SENT
     assert caught.value.outcome_unknown is False
     assert caught.value.idempotency_key is not None
+    # A direct connection that was refused: the API host itself was not reached.
+    assert caught.value.host_unreachable is True
+
+
+def closed_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port: int = probe.getsockname()[1]
+    return port
+
+
+def probe_request(url: str) -> HttpRequest:
+    return HttpRequest(method="GET", url=url + "/api/v4/project", headers={}, body=None, timeout=5)
+
+
+def test_failed_tls_handshake_with_the_api_host_is_host_unreachable(server: str) -> None:
+    # The echo server speaks plain HTTP: the TLS handshake with it fails.
+    with pytest.raises(TransportError) as caught:
+        StdlibTransport().send(probe_request(server.replace("http://", "https://")))
+    assert caught.value.phase is SendPhase.NOT_SENT
+    assert caught.value.host_unreachable is True
+
+
+@contextmanager
+def connect_proxy(status_line: bytes, then: bytes = b"") -> Iterator[str]:
+    """A proxy that answers one CONNECT with ``status_line`` and the client's next bytes with ``then``."""
+    listener = socket.socket()
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+
+    def serve() -> None:
+        try:
+            conn, _ = listener.accept()
+        except OSError:
+            return
+        with conn:
+            conn.settimeout(5)
+            try:
+                received = b""
+                while b"\r\n\r\n" not in received:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        return
+                    received += chunk
+                conn.sendall(status_line + b"\r\n\r\n")
+                if conn.recv(4096) and then:  # the TLS ClientHello of the client
+                    conn.sendall(then)
+            except OSError:
+                return
+
+    thread = threading.Thread(target=serve, daemon=True)
+    thread.start()
+    try:
+        yield f"http://127.0.0.1:{listener.getsockname()[1]}"
+    finally:
+        listener.close()
+        thread.join(timeout=5)
+
+
+def use_proxy(monkeypatch: pytest.MonkeyPatch, proxy: str) -> None:
+    for name in ("NO_PROXY", "no_proxy", "ALL_PROXY", "all_proxy"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setenv("HTTPS_PROXY", proxy)
+    monkeypatch.setenv("https_proxy", proxy)
+
+
+def test_a_proxy_that_cannot_be_reached_is_not_host_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    use_proxy(monkeypatch, f"http://127.0.0.1:{closed_port()}")
+    with pytest.raises(TransportError) as caught:
+        StdlibTransport().send(probe_request("https://api.example.com"))
+    assert caught.value.phase is SendPhase.NOT_SENT
+    assert caught.value.host_unreachable is False
+
+
+def test_a_proxy_that_refuses_the_tunnel_is_not_host_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    with connect_proxy(b"HTTP/1.1 502 Bad Gateway") as proxy:
+        use_proxy(monkeypatch, proxy)
+        with pytest.raises(TransportError) as caught:
+            StdlibTransport().send(probe_request("https://api.example.com"))
+    assert caught.value.phase is SendPhase.NOT_SENT
+    assert caught.value.host_unreachable is False
+
+
+def test_failed_tls_handshake_through_a_proxy_is_host_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The tunnel is open, so what answers the handshake is the API host, not the proxy.
+    with connect_proxy(b"HTTP/1.1 200 Connection established", b"HTTP/1.1 400 Bad Request\r\n\r\n") as proxy:
+        use_proxy(monkeypatch, proxy)
+        with pytest.raises(TransportError) as caught:
+            StdlibTransport().send(probe_request("https://api.example.com"))
+    assert caught.value.phase is SendPhase.NOT_SENT
+    assert caught.value.host_unreachable is True
 
 
 def test_connection_dropped_after_sending_is_sent(server: str) -> None:

@@ -286,14 +286,25 @@ class TransportError(EnigmossError):
     Attributes:
         phase: How far the attempt got; ``outcome_unknown`` is ``True`` unless it is ``NOT_SENT``.
         timed_out: ``True`` when the attempt hit the timeout.
+        host_unreachable: ``True`` when the transport positively knows that no connection to the
+            API host itself was established (DNS, refused or timed-out connect, TLS handshake).
+            Only such a failure lets the client ask the ``fallback_base_url`` host for the
+            current API origin. Always ``False`` unless ``phase`` is ``NOT_SENT``; a custom
+            transport sets it only when it is certain, and never for a failing proxy.
     """
 
     def __init__(
-        self, message: str, *, phase: SendPhase = SendPhase.UNKNOWN, timed_out: bool = False
+        self,
+        message: str,
+        *,
+        phase: SendPhase = SendPhase.UNKNOWN,
+        timed_out: bool = False,
+        host_unreachable: bool = False,
     ) -> None:
         super().__init__(message)
         self.phase = SendPhase(phase)
         self.timed_out = timed_out
+        self.host_unreachable = bool(host_unreachable) and self.phase is SendPhase.NOT_SENT
         self.outcome_unknown = self.phase is not SendPhase.NOT_SENT
 
 

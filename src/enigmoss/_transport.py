@@ -61,6 +61,10 @@ class Transport(Protocol):
 
     Implementations must not follow redirects or modify the URL, headers or body, and must raise
     :class:`~enigmoss.errors.TransportError` with an honest ``phase`` when no response arrives.
+    Pass ``host_unreachable=True`` to that error only when the connection to the API host itself
+    was certainly never established (DNS, connect, TLS handshake): it lets the client ask
+    ``fallback_base_url`` for the current API origin. Leave it out when unsure, and for a
+    failing proxy.
     """
 
     def send(self, request: HttpRequest) -> HttpResponse:
@@ -157,6 +161,7 @@ class StdlibTransport:
 
     def _connect(self, scheme: str, host: str, port: int, timeout: float) -> http.client.HTTPConnection:
         conn: http.client.HTTPConnection
+        proxy = None
         if scheme == "https":
             proxy = None if urllib.request.proxy_bypass(host) else urllib.request.getproxies().get("https")
             if proxy:
@@ -184,11 +189,13 @@ class StdlibTransport:
         except (OSError, http.client.HTTPException) as exc:
             conn.close()
             # DNS, refused connection, TLS handshake, proxy CONNECT: nothing of the request left
-            # the client.
+            # the client. Behind a proxy only a TLS error is known to come from the API host: it
+            # happens after the tunnel is open; anything else may be the proxy failing.
             raise TransportError(
                 f"Could not connect to {host}:{port}: {exc!r}",
                 phase=SendPhase.NOT_SENT,
                 timed_out=isinstance(exc, TimeoutError),
+                host_unreachable=not proxy or isinstance(exc, ssl.SSLError),
             ) from exc
         return conn
 
