@@ -89,7 +89,8 @@ class Enigmoss:
         fallback_base_url: A second host that tells where the API is when ``base_url`` cannot be
             reached, e.g. ``"https://api.example.org"``. After the retries, a call that still
             could not connect asks this host for the current API origin, checks the signature of
-            the answer, remembers the origin and repeats the request there. Not set: no fallback.
+            the answer, remembers the origin and repeats the request there. ``None`` or an empty
+            string (an unset environment variable) means no fallback.
         on_origin_change: Called with an :class:`OriginChange` when the client starts to use
             another API origin: log it, alert on it.
 
@@ -135,11 +136,7 @@ class Enigmoss:
             max_retries=max_retries,
             idempotency=idempotency,
             user_agent=_user_agent(app_info),
-            fallback_origin=(
-                None
-                if fallback_base_url is None
-                else _origin(fallback_base_url, allow_insecure_http, "fallback_base_url")
-            ),
+            fallback_origin=_fallback_origin(fallback_base_url, allow_insecure_http),
             allow_insecure_http=bool(allow_insecure_http),
             on_origin_change=on_origin_change,
         )
@@ -318,6 +315,13 @@ def _origin(base_url: str, allow_insecure_http: bool, name: str = "base_url") ->
     if ":" in host:
         host = f"[{host}]"
     return f"{scheme}://{host}" + (f":{port}" if port is not None else "")
+
+
+def _fallback_origin(fallback_base_url: str | None, allow_insecure_http: bool) -> str | None:
+    """``None`` and an empty value turn the fallback off; anything else must be a valid base URL."""
+    if fallback_base_url is None or (isinstance(fallback_base_url, str) and not fallback_base_url.strip()):
+        return None
+    return _origin(fallback_base_url, allow_insecure_http, "fallback_base_url")
 
 
 def _project_id(project_id: str) -> str:

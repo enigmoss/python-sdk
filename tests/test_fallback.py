@@ -698,7 +698,7 @@ def test_configuration() -> None:
     assert client._config.fallback_origin == FALLBACK_URL
     assert make_client()._config.fallback_origin is None
     for bad in (
-        "",
+        443,
         "api.example.org",
         "http://api.example.org",
         "https://api.example.org/v1",
@@ -710,6 +710,19 @@ def test_configuration() -> None:
     assert insecure._config.fallback_origin == "http://localhost:8001"
     with pytest.raises(enigmoss.ConfigurationError, match="on_origin_change"):
         make_client(on_origin_change="log")
+
+
+@pytest.mark.parametrize("empty", ["", "   ", "\n"])
+def test_an_empty_fallback_base_url_means_no_fallback(empty: str) -> None:
+    # The value usually comes from an environment variable that may be unset.
+    error = unreachable()
+    transport = HostsTransport({BASE_URL: [error]})
+    client = make_client(transport, fallback_base_url=empty)
+    assert client._config.fallback_origin is None
+    with pytest.raises(TransportError) as caught:
+        client.payments.get(PAYMENT_ID)
+    assert caught.value is error
+    assert len(transport.requests) == 3  # the retries only: nobody else is asked
 
 
 def test_from_env_reads_the_fallback_host(monkeypatch: pytest.MonkeyPatch) -> None:
