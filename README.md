@@ -276,7 +276,7 @@ Every exception derives from `enigmoss.EnigmossError` and has `outcome_unknown` 
 | `IdempotencyError` | 409 `idempotency.*`. **Not** a `ConflictError`: catching conflicts never swallows "still in progress". |
 | `RateLimitError` | 429; `.retry_after` seconds. |
 | `ServerError` | 5xx; `outcome_unknown` is always `True`. |
-| `TransportError` | No response; `outcome_unknown` unless it was certainly not sent (`.phase`). |
+| `TransportError` | No response; `outcome_unknown` unless it was certainly not sent (`.phase`). `.host_unreachable` tells that the API host itself was not reached. |
 | `UnexpectedResponseError` | Unreadable response; `outcome_unknown` on a 2xx. |
 | `WebhookVerificationError` | Webhook rejected; `.reason`. |
 | `InvalidArgumentError` | A bad argument (also a `ValueError`); nothing was sent. |
@@ -377,7 +377,9 @@ event loop. Use a `def` endpoint (FastAPI runs it in a thread pool, as above) or
   request and returns a `RawResponse` with the decoded `data`.
 - **Your own HTTP client or a test double.** Pass `transport=`: any object with
   `send(request: enigmoss.HttpRequest) -> enigmoss.HttpResponse`. It must send the URL, headers
-  and body unchanged and raise `enigmoss.TransportError(phase=...)` when no response arrives.
+  and body unchanged and raise `enigmoss.TransportError(phase=...)` when no response arrives
+  (with `host_unreachable=True` only when the API host itself certainly was not reached, see
+  [above](#when-the-api-host-cannot-be-reached)).
 
 ```python
 import json

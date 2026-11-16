@@ -29,12 +29,30 @@ import enigmoss
 client = enigmoss.Enigmoss(base_url="https://api.example.com", project_id="<uuid>",
                            payment_key="...", payout_key=None)   # at least one key
 client = enigmoss.Enigmoss.from_env()  # ENIGMOSS_BASE_URL, ENIGMOSS_PROJECT_ID, ENIGMOSS_PAYMENT_KEY, ENIGMOSS_PAYOUT_KEY
+                                       # optional: ENIGMOSS_FALLBACK_BASE_URL
 ```
 
 Keyword options: timeout=30.0 (payout/refund create >= 180 s), max_retries=2 (0 = off),
 idempotency="order_id" | "random" | None, transport=<obj with send(HttpRequest) -> HttpResponse>,
-app_info=("name", "version"), allow_insecure_http=False.
+app_info=("name", "version"), allow_insecure_http=False, fallback_base_url=None,
+on_origin_change=None (callable taking enigmoss.OriginChange: .previous, .current, .expires_at).
 Per call: `options=enigmoss.RequestOptions(idempotency_key=, timeout=, max_retries=, extra_body=, extra_query=)`.
+
+## API host fallback (optional; off unless fallback_base_url is set)
+
+Order: usual retries on the current host first; only if the last attempt still could not connect
+(DNS, refused or timed-out connect, TLS handshake - never a response timeout, a connection lost
+after sending, an error response or a failing proxy) the client sends one signed
+GET /api/v4/project/platform-brand to fallback_base_url (3 s), verifies the answer's signature,
+and repeats the request on the origin it names: same body and Idempotency-Key, fresh signature,
+fresh retries, same time budget. The origin is kept in the client object for 1 hour to 7 days
+(`client.base_url` shows it, `on_origin_change` reports it), then base_url is tried again.
+If the fallback host answers with an error or an untrusted answer, that error is raised with the
+network error as `__cause__` (outcome_unknown stays False: the request was not sent) and nothing
+is remembered; if it names the same origin or is unreachable too, the original TransportError is
+raised. After a fallback that did not help it is not tried again for 5 minutes. One client object
+per process: the state is in memory. A custom transport starts the fallback only by raising
+TransportError(phase=SendPhase.NOT_SENT, host_unreachable=True).
 
 ## Methods (keyword-only arguments named like the wire fields; ids positional)
 
@@ -94,14 +112,15 @@ EnigmossError (.outcome_unknown, .request_id, .idempotency_key)
   - ConflictError 409 (.is_order_id_taken, .existing_resource_id)
   - IdempotencyError 409 idempotency.* (NOT a ConflictError; in_progress => outcome_unknown)
   - RateLimitError 429, ServerError 5xx (outcome_unknown always True)
-- TransportError (.phase: not_sent | sent | unknown), UnexpectedResponseError,
+- TransportError (.phase: not_sent | sent | unknown, .host_unreachable), UnexpectedResponseError,
   WebhookVerificationError (.reason), InvalidArgumentError (also ValueError), ConfigurationError
 Compare `exc.code` with `enigmoss.ErrorCode.*`; always keep a default branch.
 
 ## Import map
 
 - `enigmoss`: Enigmoss, RequestOptions, Secret, Page, RawResponse, PaymentMethodRef, WebhookEvent,
-  HttpRequest, HttpResponse, Transport, StdlibTransport, every error class, ErrorCode, SendPhase.
+  HttpRequest, HttpResponse, Transport, StdlibTransport, OriginChange, every error class, ErrorCode,
+  SendPhase.
 - `enigmoss.models`: Payment, PaymentStatus, Wallet, WalletStatus, Payout, PayoutStatus, PayoutPriority,
   PayoutQuote, Refund, RefundStatus, RefundSource, Transfer, Balance, Transaction, TransactionType,
   PaymentMethod, PayoutMethod, PayoutMethodDetails, ExchangeRate (.from_), Project, EventRecord,
