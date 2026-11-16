@@ -43,7 +43,8 @@ Per call: `options=enigmoss.RequestOptions(idempotency_key=, timeout=, max_retri
 Order: usual retries on the current host first; only if the last attempt still could not connect
 (DNS, refused or timed-out connect, TLS handshake - never a response timeout, a connection lost
 after sending, an error response or a failing proxy) the client sends one signed
-GET /api/v4/project/platform-brand to fallback_base_url (3 s), verifies the answer's signature,
+GET /api/v4/project/platform-brand?nonce=<one-time> to fallback_base_url (3 s), verifies that the
+answer is signed for this very request,
 and repeats the request on the origin it names: same body and Idempotency-Key, fresh signature,
 fresh retries, same time budget. The origin is kept in the client object for 1 hour to 7 days
 (`client.base_url` shows it, `on_origin_change` reports it), then base_url is tried again.

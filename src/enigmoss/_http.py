@@ -10,6 +10,7 @@ import contextlib
 import json
 import math
 import re
+import secrets
 import threading
 import time
 from collections.abc import Callable, Mapping
@@ -46,7 +47,11 @@ API_PREFIX = "/api/v4"
 PAYOUT_TIMEOUT = 180.0
 """Creating a payout (and the payout leg of a refund) may take up to ~160 s on the server."""
 PROBE_URI = API_PREFIX + "/project/platform-brand"
-"""What the fallback host is asked: its answer carries the current API origin (``data.api.origin``)."""
+"""What the fallback host is asked: its answer carries the current API origin (``data.api.origin``).
+
+Every probe adds a one-time ``?nonce=`` to this path; a call counts as "asking for the same thing"
+when its request URI is this path without a query.
+"""
 
 T = TypeVar("T")
 
@@ -359,17 +364,25 @@ class Requester:
         return outcome.origin
 
     def _probe(self, failed: str, deadline: float) -> Outcome:
-        """One signed ``GET /api/v4/project/platform-brand`` to the fallback host, past the retry loop."""
+        """One signed ``GET /api/v4/project/platform-brand?nonce=...`` to the fallback host.
+
+        Sent straight through the transport, past the retry loop. Every request, the repeat after
+        a clock correction included, carries a fresh random nonce in the signed URI. That makes
+        the request signature unique, and the answer is signed over the request signature, so a
+        recorded answer fits no other request - not even one made in the same second, or in a
+        second the client was steered to by an unsigned ``server_time``.
+        """
         config = self.config
         key = config.payment_key or config.payout_key
         assert key is not None and config.fallback_origin is not None  # noqa: S101 - checked by the client
         host = config.fallback_origin
         clock_corrected = False
         while True:
-            headers = self._signed_headers(key, "GET", PROBE_URI, None)
+            probe_uri = f"{PROBE_URI}?nonce={secrets.token_hex(16)}"
+            headers = self._signed_headers(key, "GET", probe_uri, None)
             request = HttpRequest(
                 method="GET",
-                url=host + PROBE_URI,
+                url=host + probe_uri,
                 headers=headers,
                 body=None,
                 timeout=_fallback.PROBE_TIMEOUT,

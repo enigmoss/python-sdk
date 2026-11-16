@@ -20,7 +20,8 @@ First release candidate.
 - API host fallback, off unless `fallback_base_url` (or `ENIGMOSS_FALLBACK_BASE_URL` for
   `from_env()`) is set. After the usual retries, a call that still could not connect to the API
   host asks the fallback host for the current API origin with a signed
-  `GET /api/v4/project/platform-brand` (3 s), verifies the signature of the answer, and repeats
+  `GET /api/v4/project/platform-brand` (3 s, a one-time nonce in the signed URI, so a recorded
+  answer fits no other request), verifies the signature of the answer, and repeats
   the request there with the same body and `Idempotency-Key`. The origin is kept in the client
   object for one hour to seven days; `client.base_url` shows it and `on_origin_change` reports
   the switch as an `OriginChange`. An error or an untrusted answer of the fallback host is

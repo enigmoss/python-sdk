@@ -1,7 +1,7 @@
 """The API origin in use: the configured one, or one learned from the fallback host.
 
 When the API host cannot be reached and retries did not help, the client asks the fallback host
-for the current API origin (a signed ``GET /api/v4/project/platform-brand``), remembers the answer
+for the current API origin (a signed ``GET /api/v4/project/platform-brand?nonce=...``), remembers the answer
 and repeats the call there. This module holds the state of that switch, the single probe shared
 by concurrent calls, and the checks of the answer.
 """
@@ -189,7 +189,8 @@ def signature_problem(response: HttpResponse, key: str, request_signature: str, 
 
     The answer is signed with the key that signed the request:
     hex(hmac_sha256(key, "{X-Response-Timestamp}\\n{X-Signature of the request}\\n" + body)).
-    Binding it to the request signature makes a captured answer useless for any other request.
+    The request carries a one-time nonce in its signed URI, so its signature is unique, and an
+    answer bound to it is useless for any other request.
     """
     timestamp = (response.header("X-Response-Timestamp") or "").strip()
     signature = (response.header("X-Response-Signature") or "").strip().lower()

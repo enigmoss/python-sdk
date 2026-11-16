@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections.abc import Callable
@@ -42,6 +43,20 @@ PAYOUT: dict[str, Any] = {
     "address": "TRecipientabcdefghijklmnopqrstuvwx",
 }
 START = 1_767_225_600.0
+PROBE_URL = re.compile(re.escape(FALLBACK_URL + PROBE_URI) + r"\?nonce=([0-9a-f]{32})")
+
+
+def nonce_of(probe: HttpRequest) -> str:
+    """The one-time nonce of a probe; fails when the URL is not exactly the probe URL."""
+    match = PROBE_URL.fullmatch(probe.url)
+    assert match is not None, probe.url
+    return match.group(1)
+
+
+def probe_signature(probe: HttpRequest, key: str = PAYMENT_KEY) -> str:
+    """What the probe must be signed with: the URI as sent, query included."""
+    uri = f"{PROBE_URI}?nonce={nonce_of(probe)}"
+    return sign_request(key, int(probe.headers["X-Timestamp"]), PROJECT_ID, "GET", uri, b"")
 
 
 def scenario(
@@ -93,10 +108,13 @@ def test_a_new_origin_is_used_for_the_call_remembered_and_reported() -> None:
 
     assert len(transport.to(BASE_URL)) == 3  # the usual retries come first
     (probe,) = transport.to(FALLBACK_URL)
-    assert (probe.method, probe.url, probe.body) == ("GET", FALLBACK_URL + PROBE_URI, None)
+    assert (probe.method, probe.body) == ("GET", None)
+    assert probe.url == f"{FALLBACK_URL}{PROBE_URI}?nonce={nonce_of(probe)}"
     assert (probe.timeout, probe.keep_alive) == (3.0, False)
     assert set(probe.headers) == {"Accept", "User-Agent", "X-Project-Uuid", "X-Timestamp", "X-Signature"}
-    assert probe.headers["X-Signature"] == sign_request(
+    # The signature covers the URI with the nonce, not the bare path.
+    assert probe.headers["X-Signature"] == probe_signature(probe)
+    assert probe.headers["X-Signature"] != sign_request(
         PAYMENT_KEY, int(probe.headers["X-Timestamp"]), PROJECT_ID, "GET", PROBE_URI, b""
     )
     (repeated,) = transport.to(NEW_ORIGIN)
@@ -121,9 +139,7 @@ def test_the_probe_is_signed_with_the_payout_key_when_it_is_the_only_one() -> No
     )
     client.payouts.get("9b2d4f6a-1c3e-4a5b-8d7f-0e1a2b3c4d5e")
     (probe,) = transport.to(FALLBACK_URL)
-    assert probe.headers["X-Signature"] == sign_request(
-        PAYOUT_KEY, int(probe.headers["X-Timestamp"]), PROJECT_ID, "GET", PROBE_URI, b""
-    )
+    assert probe.headers["X-Signature"] == probe_signature(probe, PAYOUT_KEY)
     assert client.base_url == NEW_ORIGIN
 
 
@@ -209,6 +225,12 @@ FAILED_ANSWERS: list[tuple[str, Reply, type[enigmoss.EnigmossError], str]] = [
     ("origin userinfo", brand_answer("https://key@api2.example.com"), enigmoss.UnexpectedResponseError, ""),
     ("origin .local", brand_answer("https://api.intranet.local"), enigmoss.UnexpectedResponseError, ""),
     ("origin localhost", brand_answer("https://localhost"), enigmoss.UnexpectedResponseError, ""),
+    (
+        "origin with a trailing newline",
+        brand_answer("https://api2.example.com\n"),
+        enigmoss.UnexpectedResponseError,
+        "not an https",
+    ),
     ("origin loopback http", brand_answer("http://localhost:8080"), enigmoss.UnexpectedResponseError, ""),
     ("unsigned", brand_answer(signed=False), enigmoss.UnexpectedResponseError, "not signed"),
     (
@@ -417,6 +439,11 @@ def test_an_expired_timestamp_on_the_probe_is_corrected_once() -> None:
     first, second = transport.to(FALLBACK_URL)
     assert int(first.headers["X-Timestamp"]) == int(START)
     assert int(second.headers["X-Timestamp"]) == int(START) + drift
+    # The repeat is a new request: a new nonce, and a signature over it.
+    assert nonce_of(first) != nonce_of(second)
+    assert first.headers["X-Signature"] == probe_signature(first)
+    assert second.headers["X-Signature"] == probe_signature(second)
+    assert first.headers["X-Signature"] != second.headers["X-Signature"]
     # The answer is checked against the corrected clock, and the repeated call is signed with it.
     assert client.base_url == NEW_ORIGIN
     assert int(transport.to(NEW_ORIGIN)[0].headers["X-Timestamp"]) == int(START) + drift
@@ -433,6 +460,68 @@ def test_the_answer_may_be_300_seconds_away_and_its_signature_in_any_case(offset
     client, _, _, _ = scenario([unreachable()], [shouting], [ok(response("payment"))])
     client.payments.get(PAYMENT_ID)
     assert client.base_url == NEW_ORIGIN
+
+
+def test_every_probe_has_a_nonce_of_its_own() -> None:
+    busy = api_error(503, "dependency.unavailable", "dependency_error", retryable=True)
+    client, transport, clock, _ = scenario([unreachable()], [busy])
+    for _ in range(3):
+        with pytest.raises(enigmoss.ServerError):
+            client.payments.get(PAYMENT_ID)
+        clock.advance(301)  # past the pause
+    probes = transport.to(FALLBACK_URL)
+    assert len(probes) == 3
+    assert len({nonce_of(probe) for probe in probes}) == 3
+    assert len({probe.headers["X-Signature"] for probe in probes}) == 3
+    assert all(probe.headers["X-Signature"] == probe_signature(probe) for probe in probes)
+
+
+class Recorder:
+    """A fallback host that keeps the first genuine answer and replays it to every later probe."""
+
+    def __init__(self) -> None:
+        self.recorded: HttpResponse | None = None
+
+    def __call__(self, request: HttpRequest) -> HttpResponse:
+        if self.recorded is None:
+            self.recorded = brand_answer()(request)
+        return self.recorded
+
+
+def test_an_answer_signed_for_another_request_is_rejected_even_in_the_same_second() -> None:
+    recorder = Recorder()
+    first, transport, _, _ = scenario([unreachable()], [recorder], [ok(response("payment"))])
+    first.payments.get(PAYMENT_ID)  # a genuine answer, recorded on the way
+    assert first.base_url == NEW_ORIGIN
+
+    # Same project, same key, same second: only the nonce tells the two probes apart.
+    second, replayed, _, changes = scenario([unreachable()], [recorder])
+    with pytest.raises(enigmoss.UnexpectedResponseError, match="X-Response-Signature does not match"):
+        second.payments.get(PAYMENT_ID)
+    (genuine,), (probe,) = transport.to(FALLBACK_URL), replayed.to(FALLBACK_URL)
+    assert genuine.headers["X-Timestamp"] == probe.headers["X-Timestamp"]
+    assert genuine.headers["X-Signature"] != probe.headers["X-Signature"]
+    assert (second.base_url, changes) == (BASE_URL, [])
+
+
+def test_a_recorded_answer_cannot_be_replayed_by_moving_the_clock_back() -> None:
+    recorder = Recorder()
+    first, _, _, _ = scenario([unreachable()], [recorder], [ok(response("payment"))])
+    first.payments.get(PAYMENT_ID)
+
+    # Much later the fallback host claims (unsigned) that it is still the moment of the recording,
+    # and answers the corrected probe with the old answer.
+    back_then = api_error(
+        401, "auth.timestamp_expired", "authentication_error", details={"server_time": int(START)}
+    )
+    later, transport, clock, changes = scenario([unreachable()], [back_then, recorder])
+    clock.advance(5000)
+    with pytest.raises(enigmoss.UnexpectedResponseError, match="X-Response-Signature does not match"):
+        later.payments.get(PAYMENT_ID)
+    stale, corrected = transport.to(FALLBACK_URL)
+    assert int(stale.headers["X-Timestamp"]) == int(START) + 5000
+    assert int(corrected.headers["X-Timestamp"]) == int(START)  # the clock was moved back
+    assert (later.base_url, changes) == (BASE_URL, [])
 
 
 def test_a_second_expired_timestamp_on_the_probe_is_an_error() -> None:
