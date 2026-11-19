@@ -87,10 +87,11 @@ class Enigmoss:
         app_info: ``(name, version)`` of your application, appended to the User-Agent.
         allow_insecure_http: Allow ``http://`` base URLs (local development only).
         fallback_base_url: A second host that tells where the API is when ``base_url`` cannot be
-            reached, e.g. ``"https://api.example.org"``. After the retries, a call that still
-            could not connect asks this host for the current API origin, checks the signature of
-            the answer, remembers the origin and repeats the request there. ``None`` or an empty
-            string (an unset environment variable) means no fallback.
+            reached; ``"https://tavrion.org"`` for the production API of Enigmoss. After the
+            retries, a call that still could not connect asks this host for the current API
+            origin, checks the signature of the answer, remembers the origin and repeats the
+            request there. ``None`` or an empty string (an unset environment variable) means no
+            fallback; there is no default.
         on_origin_change: Called with an :class:`OriginChange` when the client starts to use
             another API origin: log it, alert on it.
 

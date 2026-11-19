@@ -40,6 +40,9 @@ Per call: `options=enigmoss.RequestOptions(idempotency_key=, timeout=, max_retri
 
 ## API host fallback (optional; off unless fallback_base_url is set)
 
+Value for the production API of Enigmoss: fallback_base_url="https://tavrion.org" (no default in the SDK;
+the host answers only this lookup, never use it as base_url).
+
 Order: usual retries on the current host first; only if the last attempt still could not connect
 (DNS, refused or timed-out connect, TLS handshake - never a response timeout, a connection lost
 after sending, an error response or a failing proxy) the client sends one signed

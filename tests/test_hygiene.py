@@ -23,7 +23,10 @@ FORBIDDEN = {
     "68ab67cf6b8b4f1bbeda25ca2d1e6e8929625ebe9d85d5e5379c81bef4cc16b6",
     "9e2aad8cd8b012c8a3bed83a18d7e7f2d18218e5701e41ec2dd9969fac3b57b6",
 }
-ALLOWED_HOSTS = re.compile(r"(?:[a-z0-9-]+\.)*example\.(?:com|org)|shop\.example|localhost|127\.0\.0\.1")
+# tavrion.org is the public fallback host of the production API: the docs must name it.
+ALLOWED_HOSTS = re.compile(
+    r"(?:[a-z0-9-]+\.)*example\.(?:com|org)|shop\.example|localhost|127\.0\.0\.1|tavrion\.org"
+)
 URL = re.compile(r"https?://([A-Za-z0-9.-]+)")
 
 

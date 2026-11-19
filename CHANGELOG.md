@@ -26,7 +26,8 @@ First release candidate.
   object for one hour to seven days; `client.base_url` shows it and `on_origin_change` reports
   the switch as an `OriginChange`. An error or an untrusted answer of the fallback host is
   raised with the network error as its cause and remembers nothing; a fallback that did not help
-  is not repeated for 5 minutes; concurrent calls share one request to the fallback host.
+  is not repeated for 5 minutes; concurrent calls share one request to the fallback host. The
+  fallback host of the Enigmoss production API is `https://tavrion.org`; the SDK has no default.
 - `TransportError.host_unreachable`: the transport is sure that no connection to the API host
   itself was made. Only such a failure starts the fallback. `StdlibTransport` sets it for direct
   connections, and behind a proxy only for a failed TLS handshake with the API host; a custom
