@@ -75,7 +75,7 @@ def test_user_agent_and_app_info() -> None:
     transport = FakeTransport(ok(response("project")))
     make_client(transport, app_info=("my-shop", "2.1.0")).project.get()
     agent = transport.last.headers["User-Agent"]
-    assert agent.startswith("enigmoss-python-sdk/1.0.0-rc1 Python/")
+    assert agent.startswith("enigmoss-python-sdk/1.0.0 Python/")
     assert agent.endswith(" my-shop/2.1.0")
     with pytest.raises(ConfigurationError):
         make_client(app_info=("bad name", None))

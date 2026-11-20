@@ -110,7 +110,7 @@ def test_non_ascii_body_is_sent_as_signed(server: str) -> None:
     assert echo["signature_valid"] is True
     assert echo["headers"]["content-type"] == "application/json"
     assert echo["headers"]["idempotency-key"].startswith("sdk1-")
-    assert echo["headers"]["user-agent"].startswith("enigmoss-python-sdk/1.0.0-rc1 Python/")
+    assert echo["headers"]["user-agent"].startswith("enigmoss-python-sdk/1.0.0 Python/")
 
 
 def test_raw_crlf_body_of_the_signature_vector(server: str) -> None:
