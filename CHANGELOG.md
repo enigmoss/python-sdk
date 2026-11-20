@@ -3,6 +3,10 @@
 All notable changes are documented here. The project follows semantic versioning;
 a Python version is dropped only in a major release.
 
+## 1.0.0
+
+Stable release of the Enigmoss Project API v4 SDK.
+
 ## 1.0.0rc1 - unreleased
 
 First release candidate.
